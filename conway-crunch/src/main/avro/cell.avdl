@@ -1,0 +1,28 @@
+@namespace("com.mkwhitacre.conway.crunch")
+protocol CellProtocol {
+
+     /**
+     * Record that represents a person and the friends they have
+     */
+     record Cell{
+     
+         /**
+         * X coordinate
+         */
+         long x;
+
+         /**
+         * Y coordinate
+         */
+         long y;
+
+         /**
+         * The generation this cell exists in
+         */
+         long generation = -1;
+
+         boolean alive = false;
+
+         boolean self = false;
+     }
+}
