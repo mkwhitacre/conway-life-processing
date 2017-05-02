@@ -1,7 +1,6 @@
 package com.mkwhitacre.conway.crunch;
 
 
-import org.apache.crunch.FilterFn;
 import org.apache.crunch.PCollection;
 import org.apache.crunch.PGroupedTable;
 import org.apache.crunch.PTable;
@@ -9,7 +8,6 @@ import org.apache.crunch.Pair;
 import org.apache.crunch.Pipeline;
 import org.apache.crunch.PipelineResult;
 import org.apache.crunch.impl.mr.MRPipeline;
-import org.apache.crunch.lib.Sort;
 import org.apache.crunch.types.avro.Avros;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
@@ -63,24 +61,38 @@ public class ConwayTool extends Configured implements Tool{
 
         nextGeneration = nextGeneration.filter(new EnsureAllAliveFn());
 
-        //sort for printing
-        //TODO easier for viewing but more complicated to do.
+        //TODO if wanted to make pretty print then would add some sorting here.
 
         return nextGeneration.values();
     }
 
     private PCollection<Cell> createInitial(Pipeline pipeline, long numCells){
         List<Cell> cells = new LinkedList<>();
-        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(3).setGeneration(0).setAlive(true).build());
-        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(2).setGeneration(0).setAlive(true).build());
+
+        //toad (period 2)
+//        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(4).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(2).setGeneration(0).setAlive(true).build());
+
+        //blinker (period 2)
+//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(1).setGeneration(0).setAlive(true).build());
+
+        //Glider
         cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(2).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(3).setGeneration(0).setAlive(true).build());
 
         return pipeline.create(cells, Avros.records(Cell.class));
     }
 
     private void printCells(PCollection<Cell> world){
-
-
-
+        world.materialize().forEach(System.out::println);
     }
 }
