@@ -1,99 +1,217 @@
-///*
-// * Licensed to the Apache Software Foundation (ASF) under one or more
-// * contributor license agreements.  See the NOTICE file distributed with
-// * this work for additional information regarding copyright ownership.
-// * The ASF licenses this file to You under the Apache License, Version 2.0
-// * (the "License"); you may not use this file except in compliance with
-// * the License.  You may obtain a copy of the License at
-// *
-// *    http://www.apache.org/licenses/LICENSE-2.0
-// *
-// * Unless required by applicable law or agreed to in writing, software
-// * distributed under the License is distributed on an "AS IS" BASIS,
-// * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// * See the License for the specific language governing permissions and
-// * limitations under the License.
-// */
-//
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.mkwhitacre.conway.spark.streaming;
-//
-//import org.apache.spark.api.java.function.FlatMapFunction;
-//import org.apache.spark.sql.Dataset;
-//import org.apache.spark.sql.Encoder;
-//import org.apache.spark.sql.Encoders;
-//import org.apache.spark.sql.Row;
-//import org.apache.spark.sql.SparkSession;
-//import org.apache.spark.sql.streaming.StreamingQuery;
-//
-//import java.util.Arrays;
-//import java.util.Iterator;
-//
-///**
-// * Consumes messages from one or more topics in Kafka and does wordcount.
-// * Usage: JavaStructuredKafkaWordCount <bootstrap-servers> <subscribe-type> <topics>
-// *   <bootstrap-servers> The Kafka "bootstrap.servers" configuration. A
-// *   comma-separated list of host:port.
-// *   <subscribe-type> There are three kinds of type, i.e. 'assign', 'subscribe',
-// *   'subscribePattern'.
-// *   |- <assign> Specific TopicPartitions to consume. Json string
-// *   |  {"topicA":[0,1],"topicB":[2,4]}.
-// *   |- <subscribe> The topic list to subscribe. A comma-separated list of
-// *   |  topics.
-// *   |- <subscribePattern> The pattern used to subscribe to topic(s).
-// *   |  Java regex string.
-// *   |- Only one of "assign, "subscribe" or "subscribePattern" options can be
-// *   |  specified for Kafka source.
-// *   <topics> Different value format depends on the value of 'subscribe-type'.
-// *
-// * Example:
-// *    `$ bin/run-example \
-// *      sql.streaming.JavaStructuredKafkaWordCount host1:port1,host2:port2 \
-// *      subscribe topic1,topic2`
-// */
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Encoders;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.streaming.StreamingQuery;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+
+
 public final class ConwayStructuredStreamingTool {
-//
-//
-//  public static Encoder CELL_ENCODER = Encoders.bean(SparkCell.class);
-//
-//  public static void main(String[] args) throws Exception {
-//    if (args.length < 3) {
-//      System.err.println("Usage: JavaStructuredKafkaWordCount <bootstrap-servers> " +
-//        "<subscribe-type> <topics>");
-//      System.exit(1);
-//    }
-//
-//    String bootstrapServers = args[0];
-//    String subscribeType = args[1];
-//    String topics = args[2];
-//
-//    SparkSession spark = SparkSession
-//      .builder()
-//      .appName("ConwayStructuredStreaming")
-//      .getOrCreate();
-//
-//    // Create DataSet representing the stream of input lines from kafka
-//    Dataset<SparkCell> lines = spark
-//      .readStream()
-//      .format("kafka")
-//      .option("kafka.bootstrap.servers", bootstrapServers)
-//      .option(subscribeType, topics)
-//      .load()
-//      .as(CELL_ENCODER);
-//
-//    // Generate running word count
-//    Dataset<Row> wordCounts = lines.flatMap(new FlatMapFunction<String, String>() {
-//      @Override
-//      public Iterator<String> call(String x) {
-//        return Arrays.asList(x.split(" ")).iterator();
-//      }
-//    }, Encoders.STRING()).groupBy("value").count();
-//
-//    // Start running the query that prints the running counts to the console
-//    StreamingQuery query = wordCounts.writeStream()
-//      .outputMode("complete")
-//      .format("console")
-//      .start();
-//
-//    query.awaitTermination();
-//  }
+
+    public static void main(String[] args) throws Exception {
+
+        String bootstrapServers = "localhost:9092";
+        String subscribeType = "subscribe";
+        String topics = "test-cell";
+
+
+        writeData(bootstrapServers, topics);
+
+        SparkSession spark = SparkSession
+                .builder()
+                .master("local")
+                .appName("JavaStructuredKafkaWordCount")
+                .getOrCreate();
+
+        // Create DataSet representing the stream of input lines from kafka
+        Dataset<Row> rows = spark
+                .readStream()
+                .format("kafka")
+                .option("kafka.bootstrap.servers", bootstrapServers)
+                .option(subscribeType, topics)
+                .option("startingOffsets", "{\""+topics+"\":{\"0\":-2}}")
+                .load();
+
+        //TODO this is the output from just reading from Kafka...
+//        +----------------+--------------------+---------+---------+------+--------------------+-------------+
+//        |             key|               value|    topic|partition|offset|           timestamp|timestampType|
+//        +----------------+--------------------+---------+---------+------+--------------------+-------------+
+//        |   [6B 65 79 30]|[AC ED 00 05 73 7...|test-cell|        0|     0|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 31]|[AC ED 00 05 73 7...|test-cell|        0|     1|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 32]|[AC ED 00 05 73 7...|test-cell|        0|     2|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 33]|[AC ED 00 05 73 7...|test-cell|        0|     3|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 34]|[AC ED 00 05 73 7...|test-cell|        0|     4|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 35]|[AC ED 00 05 73 7...|test-cell|        0|     5|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 36]|[AC ED 00 05 73 7...|test-cell|        0|     6|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 37]|[AC ED 00 05 73 7...|test-cell|        0|     7|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 38]|[AC ED 00 05 73 7...|test-cell|        0|     8|2017-05-15 20:47:...|            0|
+//        |   [6B 65 79 39]|[AC ED 00 05 73 7...|test-cell|        0|     9|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 30]|[AC ED 00 05 73 7...|test-cell|        0|    10|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 31]|[AC ED 00 05 73 7...|test-cell|        0|    11|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 32]|[AC ED 00 05 73 7...|test-cell|        0|    12|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 33]|[AC ED 00 05 73 7...|test-cell|        0|    13|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 34]|[AC ED 00 05 73 7...|test-cell|        0|    14|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 35]|[AC ED 00 05 73 7...|test-cell|        0|    15|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 36]|[AC ED 00 05 73 7...|test-cell|        0|    16|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 37]|[AC ED 00 05 73 7...|test-cell|        0|    17|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 38]|[AC ED 00 05 73 7...|test-cell|        0|    18|2017-05-15 20:47:...|            0|
+//        |[6B 65 79 31 39]|[AC ED 00 05 73 7...|test-cell|        0|    19|2017-05-15 20:47:...|            0|
+//        +----------------+--------------------+---------+---------+------+--------------------+-------------+
+
+        //from https://spark.apache.org/docs/2.1.0/structured-streaming-kafka-integration.html
+        //key.deserializer: Keys are always deserialized as byte arrays with ByteArrayDeserializer. Use DataFrame operations to explicitly deserialize the keys.
+        //value.deserializer: Values are always deserialized as byte arrays with ByteArrayDeserializer. Use DataFrame operations to explicitly deserialize the values.
+
+        Dataset<SparkCell> cells = rows.select("value").as(Encoders.BINARY()).map(new SerializeFn(), Encoders.bean(SparkCell.class));
+
+        //TODO this is the output when you print the cells dataset to the console
+//        +-----+----------+---+---+
+//        |alive|generation|  x|  y|
+//        +-----+----------+---+---+
+//        | true|         0|  0|  0|
+//        | true|         0|  1|  1|
+//        | true|         0|  2|  2|
+//        | true|         0|  3|  3|
+//        | true|         0|  4|  4|
+//        | true|         0|  5|  5|
+//        | true|         0|  6|  6|
+//        | true|         0|  7|  7|
+//        | true|         0|  8|  8|
+//        | true|         0|  9|  9|
+//        | true|         0| 10| 10|
+//        | true|         0| 11| 11|
+//        | true|         0| 12| 12|
+//        | true|         0| 13| 13|
+//        | true|         0| 14| 14|
+//        | true|         0| 15| 15|
+//        | true|         0| 16| 16|
+//        | true|         0| 17| 17|
+//        | true|         0| 18| 18|
+//        | true|         0| 19| 19|
+//        +-----+----------+---+---+
+
+
+        //find all neighbors
+
+        //apply rules
+
+
+        //filter out dead
+
+
+        //write out the complete table back to same Kafka topic + console?
+
+
+        // Start running the query that prints the running counts to the console
+        StreamingQuery query = cells.writeStream()
+                .outputMode("append")
+                .format("console")
+                .start();
+
+
+
+
+        query.awaitTermination();
+    }
+
+
+    private static void writeData(String servers, String topic){
+
+        Properties props = new Properties();
+        props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, servers);
+        props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, JavaStructuredKafkaWordCount.StringSerDe.class.getName());
+        props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, CellSerDe.class.getName());
+
+        Producer<String, SparkCell> producer = new KafkaProducer<>(props);
+
+
+        List<Future<RecordMetadata>> futures = new LinkedList<>();
+        for(int i = 0; i < 100; i++){
+            SparkCell cell = new SparkCell();
+            cell.setX(i);
+            cell.setY(i);
+            cell.setAlive(true);
+            futures.add(producer.send(new ProducerRecord<>(topic, "key" + i, cell)));
+        }
+
+        for(Future<RecordMetadata> f: futures){
+            try {
+                f.get();
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException("stuff didn't work", e);
+            }
+        }
+    }
+
+    public static class CellSerDe implements Serializer<SparkCell>, Deserializer<SparkCell>{
+
+        @Override
+        public SparkCell deserialize(String topic, byte[] value) {
+            try (ByteArrayInputStream in = new ByteArrayInputStream(value);
+                 ObjectInputStream iStream = new ObjectInputStream(in)) {
+                return (SparkCell) iStream.readObject();
+            } catch (IOException | ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void configure(Map<String, ?> map, boolean b) {
+
+        }
+
+        @Override
+        public byte[] serialize(String topic, SparkCell value) {
+            try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+                 ObjectOutputStream outStream = new ObjectOutputStream(out)){
+                outStream.writeObject(value);
+                return out.toByteArray();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void close() {
+
+        }
+    }
+
 }
