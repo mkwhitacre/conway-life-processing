@@ -71,11 +71,11 @@ public final class ConwaySparkTool {
 //        coords.add(new Tuple2<>(1L, 1L));
 
 //        //Glider
-        coords.add(new Tuple2<>(1L, 1L));
-        coords.add(new Tuple2<>(2L, 1L));
-        coords.add(new Tuple2<>(3L, 1L));
-        coords.add(new Tuple2<>(3L, 2L));
-        coords.add(new Tuple2<>(2L, 3L));
+//        coords.add(new Tuple2<>(1L, 1L));
+//        coords.add(new Tuple2<>(2L, 1L));
+//        coords.add(new Tuple2<>(3L, 1L));
+//        coords.add(new Tuple2<>(3L, 2L));
+//        coords.add(new Tuple2<>(2L, 3L));
 
 
         return coords.stream().map(c -> {

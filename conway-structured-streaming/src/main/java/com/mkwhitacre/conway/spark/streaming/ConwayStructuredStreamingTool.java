@@ -29,6 +29,7 @@ import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.streaming.StreamingQuery;
+import scala.Tuple2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -41,6 +42,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 
 public final class ConwayStructuredStreamingTool {
@@ -49,7 +51,7 @@ public final class ConwayStructuredStreamingTool {
 
         String bootstrapServers = "localhost:9092";
         String subscribeType = "subscribe";
-        String topics = "test-cell";
+        String topics = "test-cell-blinker";
 
 
         writeData(bootstrapServers, topics);
@@ -128,6 +130,48 @@ public final class ConwayStructuredStreamingTool {
 //        +-----+----------+---+---+
 
 
+
+
+
+
+        Dataset<Tuple2<Tuple2<Long, Long>, Tuple2<SparkCell, Integer>>> keyedNeighbors = cells.flatMap(new FindNeighborsFn(),
+                Encoders.tuple(Encoders.tuple(Encoders.LONG(), Encoders.LONG()),
+                        Encoders.tuple(Encoders.bean(SparkCell.class), Encoders.INT())))
+
+
+
+//        +-----+----------------+
+//        |   _1|              _2|
+//        +-----+----------------+
+//        |[0,2]|        [null,1]|
+//        |[0,3]|        [null,1]|
+//        |[0,4]|        [null,1]|
+//        |[1,2]|        [null,1]|
+//        |[1,3]|[[true,0,1,3],0]|
+//        |[1,4]|        [null,1]|
+//        |[2,2]|        [null,1]|
+//        |[2,3]|        [null,1]|
+//        |[2,4]|        [null,1]|
+//        |[0,1]|        [null,1]|
+//        |[0,2]|        [null,1]|
+//        |[0,3]|        [null,1]|
+//        |[1,1]|        [null,1]|
+//        |[1,2]|[[true,0,1,2],0]|
+//        |[1,3]|        [null,1]|
+//        |[2,1]|        [null,1]|
+//        |[2,2]|        [null,1]|
+//        |[2,3]|        [null,1]|
+//        |[0,0]|        [null,1]|
+//        |[0,1]|        [null,1]|
+//        +-----+----------------+
+
+
+//        .withColumnRenamed("_1", "coordinates").withColumnRenamed("cell_count", "_2");
+
+        ;
+
+
+
         //find all neighbors
 
         //apply rules
@@ -140,7 +184,7 @@ public final class ConwayStructuredStreamingTool {
 
 
         // Start running the query that prints the running counts to the console
-        StreamingQuery query = cells.writeStream()
+        StreamingQuery query = keyedNeighbors.writeStream()
                 .outputMode("append")
                 .format("console")
                 .start();
@@ -161,14 +205,10 @@ public final class ConwayStructuredStreamingTool {
 
         Producer<String, SparkCell> producer = new KafkaProducer<>(props);
 
-
         List<Future<RecordMetadata>> futures = new LinkedList<>();
-        for(int i = 0; i < 100; i++){
-            SparkCell cell = new SparkCell();
-            cell.setX(i);
-            cell.setY(i);
-            cell.setAlive(true);
-            futures.add(producer.send(new ProducerRecord<>(topic, "key" + i, cell)));
+        for(SparkCell cell: createInitial(10)){
+
+            futures.add(producer.send(new ProducerRecord<>(topic, "key" + cell.getX()+"-"+cell.getY(), cell)));
         }
 
         for(Future<RecordMetadata> f: futures){
@@ -179,6 +219,42 @@ public final class ConwayStructuredStreamingTool {
             }
         }
     }
+
+    private static List<SparkCell> createInitial(long numCells){
+        List<Tuple2<Long, Long>> coords = new LinkedList<>();
+
+//        //toad (period 2)
+//        coords.add(new Tuple2<>(2L, 3L));
+//        coords.add(new Tuple2<>(3L, 3L));
+//        coords.add(new Tuple2<>(4L, 3L));
+//        coords.add(new Tuple2<>(1L, 2L));
+//        coords.add(new Tuple2<>(2L, 2L));
+//        coords.add(new Tuple2<>(3L, 2L));
+
+        //blinker (period 2)
+        coords.add(new Tuple2<>(1L, 3L));
+        coords.add(new Tuple2<>(1L, 2L));
+        coords.add(new Tuple2<>(1L, 1L));
+
+//        //Glider
+//        coords.add(new Tuple2<>(1L, 1L));
+//        coords.add(new Tuple2<>(2L, 1L));
+//        coords.add(new Tuple2<>(3L, 1L));
+//        coords.add(new Tuple2<>(3L, 2L));
+//        coords.add(new Tuple2<>(2L, 3L));
+
+
+        return coords.stream().map(c -> {
+            SparkCell cell = new SparkCell();
+            cell.setAlive(true);
+            cell.setGeneration(0);
+            cell.setX(c._1());
+            cell.setY(c._2());
+
+            return cell;
+        }).collect(Collectors.toList());
+    }
+
 
     public static class CellSerDe implements Serializer<SparkCell>, Deserializer<SparkCell>{
 
