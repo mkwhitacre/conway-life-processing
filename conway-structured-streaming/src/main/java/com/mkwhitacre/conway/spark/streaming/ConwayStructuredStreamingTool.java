@@ -24,10 +24,12 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serializer;
+import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.streaming.StreamingQuery;
 import scala.Tuple2;
 
@@ -51,7 +53,7 @@ public final class ConwayStructuredStreamingTool {
 
         String bootstrapServers = "localhost:9092";
         String subscribeType = "subscribe";
-        String topics = "test-cell-blinker";
+        String topics = "test-suma";
 
 
         writeData(bootstrapServers, topics);
@@ -59,7 +61,7 @@ public final class ConwayStructuredStreamingTool {
         SparkSession spark = SparkSession
                 .builder()
                 .master("local")
-                .appName("JavaStructuredKafkaWordCount")
+                .appName("ConwayStructuredStreamingTool")
                 .getOrCreate();
 
         // Create DataSet representing the stream of input lines from kafka
@@ -132,47 +134,53 @@ public final class ConwayStructuredStreamingTool {
 
 
 
+        Dataset<Row> neighbor_count = cells.withColumn("neighbor_count", functions.lit(1))
+                .withColumn("coord", functions.concat_ws(",", new Column("x"), new Column("y")));
 
-
-        Dataset<Tuple2<Tuple2<Long, Long>, Tuple2<SparkCell, Integer>>> keyedNeighbors = cells.flatMap(new FindNeighborsFn(),
-                Encoders.tuple(Encoders.tuple(Encoders.LONG(), Encoders.LONG()),
-                        Encoders.tuple(Encoders.bean(SparkCell.class), Encoders.INT())))
-
-
-
-//        +-----+----------------+
-//        |   _1|              _2|
-//        +-----+----------------+
-//        |[0,2]|        [null,1]|
-//        |[0,3]|        [null,1]|
-//        |[0,4]|        [null,1]|
-//        |[1,2]|        [null,1]|
-//        |[1,3]|[[true,0,1,3],0]|
-//        |[1,4]|        [null,1]|
-//        |[2,2]|        [null,1]|
-//        |[2,3]|        [null,1]|
-//        |[2,4]|        [null,1]|
-//        |[0,1]|        [null,1]|
-//        |[0,2]|        [null,1]|
-//        |[0,3]|        [null,1]|
-//        |[1,1]|        [null,1]|
-//        |[1,2]|[[true,0,1,2],0]|
-//        |[1,3]|        [null,1]|
-//        |[2,1]|        [null,1]|
-//        |[2,2]|        [null,1]|
-//        |[2,3]|        [null,1]|
-//        |[0,0]|        [null,1]|
-//        |[0,1]|        [null,1]|
-//        +-----+----------------+
-
-
-//        .withColumnRenamed("_1", "coordinates").withColumnRenamed("cell_count", "_2");
-
-        ;
-
-
+//        +-----+----------+---+---+--------------+-----+
+//        |alive|generation|  x|  y|neighbor_count|coord|
+//        +-----+----------+---+---+--------------+-----+
+//        | true|         0|  1|  3|             1|  1,3|
+//        | true|         0|  1|  2|             1|  1,2|
+//        | true|         0|  1|  1|             1|  1,1|
+//        | true|         0|  1|  3|             1|  1,3|
+//        | true|         0|  1|  2|             1|  1,2|
+//        | true|         0|  1|  1|             1|  1,1|
+//        | true|         0|  1|  3|             1|  1,3|
+//        | true|         0|  1|  2|             1|  1,2|
+//        | true|         0|  1|  1|             1|  1,1|
+//        +-----+----------+---+---+--------------+-----+
 
         //find all neighbors
+        Dataset<Row> worldWithNeighbors = neighbor_count.flatMap(new GenerateNeighborsFn(), Encoders.tuple(Encoders.STRING(), Encoders.bean(SparkCell.class), Encoders.INT()))
+                .toDF("coord", "cell", "count");
+
+
+        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").sum("count");
+
+
+        //closer but need the original state of the cell 
+
+//        +-----+----------+
+//        |coord|sum(count)|
+//        +-----+----------+
+//        |  1,1|         1|
+//        |  0,1|         2|
+//        |  1,4|         1|
+//        |  2,4|         1|
+//        |  2,2|         3|
+//        |  1,2|         2|
+//        |  2,3|         2|
+//        |  0,4|         1|
+//        |  0,2|         3|
+//        |  1,0|         1|
+//        |  2,0|         1|
+//        |  0,3|         2|
+//        |  0,0|         1|
+//        |  1,3|         1|
+//        |  2,1|         2|
+//        +-----+----------+
+
 
         //apply rules
 
@@ -184,8 +192,8 @@ public final class ConwayStructuredStreamingTool {
 
 
         // Start running the query that prints the running counts to the console
-        StreamingQuery query = keyedNeighbors.writeStream()
-                .outputMode("append")
+        StreamingQuery query = sum.writeStream()
+                .outputMode("complete")
                 .format("console")
                 .start();
 
