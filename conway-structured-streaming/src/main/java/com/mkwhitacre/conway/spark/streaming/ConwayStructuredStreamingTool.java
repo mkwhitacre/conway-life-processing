@@ -29,6 +29,7 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.TypedColumn;
 import org.apache.spark.sql.functions;
 import org.apache.spark.sql.streaming.StreamingQuery;
 import scala.Tuple2;
@@ -53,7 +54,7 @@ public final class ConwayStructuredStreamingTool {
 
         String bootstrapServers = "localhost:9092";
         String subscribeType = "subscribe";
-        String topics = "test-suma";
+        String topics = "test-sum"+System.currentTimeMillis();
 
 
         writeData(bootstrapServers, topics);
@@ -63,6 +64,9 @@ public final class ConwayStructuredStreamingTool {
                 .master("local")
                 .appName("ConwayStructuredStreamingTool")
                 .getOrCreate();
+
+        spark.sqlContext().udf().register("mergeCells", new AggregateCellsUntypedFn());
+
 
         // Create DataSet representing the stream of input lines from kafka
         Dataset<Row> rows = spark
@@ -134,7 +138,7 @@ public final class ConwayStructuredStreamingTool {
 
 
 
-        Dataset<Row> neighbor_count = cells.withColumn("neighbor_count", functions.lit(1))
+        Dataset<Row> neighbor_count = cells.withColumn("neighbor_count", functions.lit(0))
                 .withColumn("coord", functions.concat_ws(",", new Column("x"), new Column("y")));
 
 //        +-----+----------+---+---+--------------+-----+
@@ -156,10 +160,44 @@ public final class ConwayStructuredStreamingTool {
                 .toDF("coord", "cell", "count");
 
 
-        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").sum("count");
+        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").agg(functions.sum("count").as("combined_count"), functions.expr("mergeCells(cell.alive, cell.x, cell.y) as merged"));
+
+//        +-----+--------------+-----------+
+//        |coord|combined_count|     merged|
+//        +-----+--------------+-----------+
+//        |  1,1|             1| [true,1,1]|
+//        |  0,1|             2|[false,0,1]|
+//        |  1,4|             1|[false,1,4]|
+//        |  2,4|             1|[false,2,4]|
+//        |  2,2|             3|[false,2,2]|
+//        |  1,2|             2| [true,1,2]|
+//        |  2,3|             2|[false,2,3]|
+//        |  0,4|             1|[false,0,4]|
+//        |  0,2|             3|[false,0,2]|
+//        |  1,0|             1|[false,1,0]|
+//        |  2,0|             1|[false,2,0]|
+//        |  0,3|             2|[false,0,3]|
+//        |  0,0|             1|[false,0,0]|
+//        |  1,3|             1| [true,1,3]|
+//        |  2,1|             2|[false,2,1]|
+//        +-----+--------------+-----------+
+
+        //filter out the cells that will die from overpopulation or not enough neighbors
+        sum = sum.filter("combined_count > 1").filter("combined_count < 4");
+
+        Dataset<SparkCell> nextGeneration = sum.select("combined_count", "merged")
+                .map(new LifeDeathFn(), Encoders.bean(SparkCell.class)).filter("alive");
 
 
-        //closer but need the original state of the cell 
+
+
+        
+
+
+        //closer but need the original state of the cell
+
+
+//        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").sum("count");
 
 //        +-----+----------+
 //        |coord|sum(count)|
@@ -192,7 +230,7 @@ public final class ConwayStructuredStreamingTool {
 
 
         // Start running the query that prints the running counts to the console
-        StreamingQuery query = sum.writeStream()
+        StreamingQuery query = nextGeneration.writeStream()
                 .outputMode("complete")
                 .format("console")
                 .start();

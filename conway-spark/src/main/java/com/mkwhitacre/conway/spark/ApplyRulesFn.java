@@ -34,7 +34,7 @@ public class ApplyRulesFn implements Function<Tuple2<Tuple2<Long, Long>, Tuple2<
             }
         } else{
             //cell is alive so check to see if it stays alive
-            if(neighborCount ==2 || neighborCount== 3) {
+            if(neighborCount == 2 || neighborCount== 3) {
                 cell.setAlive(true);
                 return cell;
             }
