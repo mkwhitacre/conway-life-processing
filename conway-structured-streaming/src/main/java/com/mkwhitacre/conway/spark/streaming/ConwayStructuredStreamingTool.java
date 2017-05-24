@@ -29,7 +29,6 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.sql.TypedColumn;
 import org.apache.spark.sql.functions;
 import org.apache.spark.sql.streaming.StreamingQuery;
 import scala.Tuple2;
@@ -65,6 +64,7 @@ public final class ConwayStructuredStreamingTool {
                 .appName("ConwayStructuredStreamingTool")
                 .getOrCreate();
 
+        //register a UDAF such that you can properly merge two Cell values
         spark.sqlContext().udf().register("mergeCells", new AggregateCellsUntypedFn());
 
 
@@ -137,30 +137,36 @@ public final class ConwayStructuredStreamingTool {
 
 
 
-
-        Dataset<Row> neighbor_count = cells.withColumn("neighbor_count", functions.lit(0))
+        Dataset<Row> enhancedCells = cells
+                //add in a column that represents that cells neighbor count.  Set it to 0 since cell represents
+                //itself and therefor is not also a neighbor
+                .withColumn("neighbor_count", functions.lit(0))
+                //create a single column that is the concatenation of the coordinates so you can group by a single column.
                 .withColumn("coord", functions.concat_ws(",", new Column("x"), new Column("y")));
 
 //        +-----+----------+---+---+--------------+-----+
 //        |alive|generation|  x|  y|neighbor_count|coord|
 //        +-----+----------+---+---+--------------+-----+
-//        | true|         0|  1|  3|             1|  1,3|
-//        | true|         0|  1|  2|             1|  1,2|
-//        | true|         0|  1|  1|             1|  1,1|
-//        | true|         0|  1|  3|             1|  1,3|
-//        | true|         0|  1|  2|             1|  1,2|
-//        | true|         0|  1|  1|             1|  1,1|
-//        | true|         0|  1|  3|             1|  1,3|
-//        | true|         0|  1|  2|             1|  1,2|
-//        | true|         0|  1|  1|             1|  1,1|
+//        | true|         0|  1|  3|             0|  1,3|
+//        | true|         0|  1|  2|             0|  1,2|
+//        | true|         0|  1|  1|             0|  1,1|
+//        | true|         0|  1|  3|             0|  1,3|
+//        | true|         0|  1|  2|             0|  1,2|
+//        | true|         0|  1|  1|             0|  1,1|
+//        | true|         0|  1|  3|             0|  1,3|
+//        | true|         0|  1|  2|             0|  1,2|
+//        | true|         0|  1|  1|             0|  1,1|
 //        +-----+----------+---+---+--------------+-----+
 
-        //find all neighbors
-        Dataset<Row> worldWithNeighbors = neighbor_count.flatMap(new GenerateNeighborsFn(), Encoders.tuple(Encoders.STRING(), Encoders.bean(SparkCell.class), Encoders.INT()))
+        //generate all of the neighbors for the live cells with count and coordination
+        Dataset<Row> worldWithNeighbors = enhancedCells.flatMap(new GenerateNeighborsFn(), Encoders.tuple(Encoders.STRING(), Encoders.bean(SparkCell.class), Encoders.INT()))
                 .toDF("coord", "cell", "count");
 
 
-        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").agg(functions.sum("count").as("combined_count"), functions.expr("mergeCells(cell.alive, cell.x, cell.y) as merged"));
+        //group the cells by the same coordinator values
+        Dataset<Row> mergeCells = worldWithNeighbors.groupBy("coord")
+                //aggregate the cells by summing up the count of the neighbors and also merging the cells using a UDAF
+                .agg(functions.sum("count").as("combined_count"), functions.expr("mergeCells(cell.alive, cell.x, cell.y) as merged"));
 
 //        +-----+--------------+-----------+
 //        |coord|combined_count|     merged|
@@ -182,51 +188,18 @@ public final class ConwayStructuredStreamingTool {
 //        |  2,1|             2|[false,2,1]|
 //        +-----+--------------+-----------+
 
-        //filter out the cells that will die from overpopulation or not enough neighbors
-        sum = sum.filter("combined_count > 1").filter("combined_count < 4");
+        //filter out the cells that will obviously die from overpopulation or isolation
+        mergeCells = mergeCells.filter("combined_count > 1").filter("combined_count < 4");
 
-        Dataset<SparkCell> nextGeneration = sum.select("combined_count", "merged")
-                .map(new LifeDeathFn(), Encoders.bean(SparkCell.class)).filter("alive");
-
-
-
-
-        
-
-
-        //closer but need the original state of the cell
+         //only select the columns we care about.
+        Dataset<SparkCell> nextGeneration = mergeCells.select("combined_count", "merged")
+                //apply the rules for creating new life
+                .map(new LifeDeathFn(), Encoders.bean(SparkCell.class))
+                //filter out those cells to only keep the ones that are alive.
+                .filter("alive");
 
 
-//        Dataset<Row> sum = worldWithNeighbors.groupBy("coord").sum("count");
-
-//        +-----+----------+
-//        |coord|sum(count)|
-//        +-----+----------+
-//        |  1,1|         1|
-//        |  0,1|         2|
-//        |  1,4|         1|
-//        |  2,4|         1|
-//        |  2,2|         3|
-//        |  1,2|         2|
-//        |  2,3|         2|
-//        |  0,4|         1|
-//        |  0,2|         3|
-//        |  1,0|         1|
-//        |  2,0|         1|
-//        |  0,3|         2|
-//        |  0,0|         1|
-//        |  1,3|         1|
-//        |  2,1|         2|
-//        +-----+----------+
-
-
-        //apply rules
-
-
-        //filter out dead
-
-
-        //write out the complete table back to same Kafka topic + console?
+        //TODO write out the complete table back to same Kafka topic + console?
 
 
         // Start running the query that prints the running counts to the console
@@ -234,8 +207,6 @@ public final class ConwayStructuredStreamingTool {
                 .outputMode("complete")
                 .format("console")
                 .start();
-
-
 
 
         query.awaitTermination();
