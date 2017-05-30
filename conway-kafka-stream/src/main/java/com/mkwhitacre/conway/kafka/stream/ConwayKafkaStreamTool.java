@@ -3,9 +3,6 @@ package com.mkwhitacre.conway.kafka.stream;
 import com.mkwhitacre.conway.kafka.stream.util.SpecificAvroSerde;
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import org.apache.avro.specific.SpecificRecord;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -32,15 +29,14 @@ public class ConwayKafkaStreamTool {
 
     public static void main(String[] args) throws InterruptedException {
 
-
         String bootstrapServers = "localhost:9092";
         String schemaURL = "http://localhost:8081";
         //Use this to ensure uniqueness of topic + state
         long unique = System.currentTimeMillis();
-        String startTopic = "start-cells-blinker-foobar"+unique;
+        String topic = "game-life-cells" + unique;
 
 
-        writeData(bootstrapServers, schemaURL, startTopic);
+        writeData(bootstrapServers, schemaURL, topic);
 
         final Properties streamsConfiguration = new Properties();
         // Give the Streams application a unique name.  The name must be unique in the Kafka cluster
@@ -55,115 +51,111 @@ public class ConwayKafkaStreamTool {
         streamsConfiguration.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
 
 
-
         final KStreamBuilder builder = new KStreamBuilder();
 
         SpecificAvroSerde<Coord> keySerde = createSerde(schemaURL);
         SpecificAvroSerde<Cell> valueSerde = createSerde(schemaURL);
 
+        //read the values out of Kafka to populate the table.
+        KTable<Coord, Cell> world = builder.table(keySerde, valueSerde, topic, "world-store" + unique);
+
+        //filter out any null values because those represent "tombstones" and values that should be removed
+        KStream<Coord, Cell> cells = world.toStream().filter((k, v) -> v != null);
 
 
-        KStream<Coord, Cell> cells = builder.stream(keySerde, valueSerde, startTopic);
-
+        //create all of the neighbors so that we can perform the proper counts.
         KStream<Coord, Cell> cellsWithNeighbors = cells.flatMap((key, value) -> {
 
             long cellX = key.getX();
             long cellY = key.getY();
-
-            System.out.println("Key:"+key+" Value:"+value);
-
+            //increment the generation value as we are calculating a new generation
+            long valueNextGeneration = value.getGeneration() + 1;
             //emit this value for coordinates that are for neighbors
             Cell neighborValue = Cell.newBuilder().setAlive(false).setX(cellX).setY(cellY)
-                    .setNeighborCount(1).setGeneration(value.getGeneration()+1).build();
+                    .setNeighborCount(1).setGeneration(valueNextGeneration).build();
+
+            //create the new "value" for the cell representing the current cell.
+            Cell newValue = Cell.newBuilder(value).setGeneration(valueNextGeneration).build();
 
             return LongStream.range(-1, 2).mapToObj(x -> LongStream.range(-1, 2)
                     //collect neighbor coordinates
                     .mapToObj(y ->
-                        Coord.newBuilder().setX(cellX + x).setY(cellY + y).build())
+                            Coord.newBuilder().setX(cellX + x).setY(cellY + y).build())
                     .collect(Collectors.toList()))
                     //flatmap into a single list of <Coord, Cell>
                     .flatMap(List::stream).map(c -> {
-                //if this refers to the cell then place SparkCell in the value
-                if (c.getX().equals(cellX) && c.getY().equals(cellY)) {
-                    return new KeyValue<>(c, value);
-                }
-
-                return new KeyValue<>(c, Cell.newBuilder(neighborValue).setX(c.getX()).setY(c.getY()).build());
-            }).collect(Collectors.toList());
+                        //if this refers to the cell then place SparkCell in the value
+                        if (c.getX().equals(cellX) && c.getY().equals(cellY)) {
+                            return new KeyValue<>(c, newValue);
+                        }
+                        //update the X and Y values appropriately
+                        return new KeyValue<>(c, Cell.newBuilder(neighborValue).setX(c.getX()).setY(c.getY()).build());
+                    }).collect(Collectors.toList());
         });
 
 
         KTable<Coord, Cell> reduce = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
+                .reduce((aggValue, newValue) -> {
 
+                    //The KTable being created maintains the values from the last iteration
+                    //and we do not want those values to affect our current count.
+                    //therefore to avoid using those values in the count we only aggregate
+                    //when the generation is equal and we also only use the higher value.
+                    long aggGeneration = aggValue.getGeneration();
+                    long newGeneration = newValue.getGeneration();
 
+                    if (aggGeneration != newGeneration) {
+                        if (aggGeneration > newGeneration) {
+                            return aggValue;
+                        } else {
+                            return newValue;
+                        }
+                    }
 
- .reduce((aggValue, newValue) -> {
-      return Cell.newBuilder(aggValue).setAlive(aggValue.getAlive()|| newValue.getAlive())
-                    .setNeighborCount(aggValue.getNeighborCount()+newValue.getNeighborCount()).build();
-        }, "reduce-cells"+unique).mapValues(c -> {
+                    //generation values are the same so we should aggregate the values
+                    return Cell.newBuilder(aggValue).setAlive(aggValue.getAlive() || newValue.getAlive())
+                            .setNeighborCount(aggValue.getNeighborCount() + newValue.getNeighborCount()).build();
+                }, "reduce-cells" + unique)
 
-            boolean isAlive = c.getAlive();
-            int neighborCount = c.getNeighborCount();
+                //now that we've aggregated counts we should apply the rules
+                .mapValues(c -> {
+                    boolean isAlive = c.getAlive();
+                    int neighborCount = c.getNeighborCount();
+                    //reset the count
+                    Cell.Builder cellBuilder = Cell.newBuilder(c).clearNeighborCount();
 
-            Cell.Builder cellBuilder = Cell.newBuilder(c);
+                    if (isAlive) {
+                        //cell is currently alive and should stay alive based on the number of neighbors
+                        if (neighborCount == 2 || neighborCount == 3) {
+                            return cellBuilder.setAlive(true).build();
+                        }
+                    } else {
+                        //cell is not alive but should be if count is correct value.
+                        if (neighborCount == 3) {
+                            return cellBuilder.setAlive(true).build();
+                        }
+                    }
 
-            if(isAlive){
-                if(neighborCount == 2 || neighborCount == 3){
-                    cellBuilder.setAlive(true);
-                }
-            }else{
-                if(neighborCount == 3){
-                    cellBuilder.setAlive(true);
-                }
-            }
+                    //For cells that should not be alive or die, need to emit null to represent a delete
+                    return (Cell) null;
+                });
 
-            return cellBuilder.build();
-        }).filter((k, v) -> v != null || v.getAlive());
-
+        //print out the state of the table for debug purposes.
         reduce.print();
 
-        reduce = reduce.mapValues(c -> Cell.newBuilder(c).clearNeighborCount().build());
-
-        reduce.to(keySerde, valueSerde, startTopic);
+        //write the "changes" of updates, inserts, and deletes into the original topic
+        reduce.to(keySerde, valueSerde, topic);
 
         final KafkaStreams streams = new KafkaStreams(builder, streamsConfiguration);
 
         streams.cleanUp();
         streams.start();
 
-
-        Thread.sleep(120000L);
-
-
-//        readCells(bootstrapServers, schemaURL, startTopic);
-
-
+        //the streams process it non-blocking.  Just run for a time
+        Thread.sleep(60000L);
     }
 
-    private static void readCells(final String bootstrapServers,
-                                              final String schemaRegistryUrl,
-                                              String topic) {
-        final Properties consumerProps = new Properties();
-        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "test");
-        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-
-        SpecificAvroSerde<Coord> keySerde = createSerde(schemaRegistryUrl);
-        SpecificAvroSerde<Cell> valueSerde = createSerde(schemaRegistryUrl);
-
-        final KafkaConsumer<Coord, Cell> consumer = new KafkaConsumer<>(consumerProps,
-                keySerde.deserializer(), valueSerde.deserializer());
-        consumer.subscribe(Collections.singleton(topic));
-        while(true) {
-            final ConsumerRecords<Coord, Cell> records = consumer.poll(Long.MAX_VALUE);
-            records.forEach(record -> System.out.println(record.value()));
-        }
-//        consumer.close();
-    }
-
-
-    private static void writeData(String servers, String schemaURL, String topic){
+    private static void writeData(String servers, String schemaURL, String topic) {
 
         Properties props = new Properties();
         props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, servers);
@@ -174,15 +166,14 @@ public class ConwayKafkaStreamTool {
         Producer<Coord, Cell> producer = new KafkaProducer<>(props, keySerde.serializer(), valueSerde.serializer());
 
         List<Future<RecordMetadata>> futures = new LinkedList<>();
-        for(Cell cell: createInitial(10)){
+        for (Cell cell : createInitial(10)) {
 
             Coord coord = Coord.newBuilder().setX(cell.getX()).setY(cell.getY()).build();
-//                        Coord coord = Coord.newBuilder(cell.getCoordinates()).build();
 
-            futures.add(producer.send(new ProducerRecord<>(topic, coord , cell)));
+            futures.add(producer.send(new ProducerRecord<>(topic, coord, cell)));
         }
 
-        for(Future<RecordMetadata> f: futures){
+        for (Future<RecordMetadata> f : futures) {
             try {
                 f.get();
             } catch (InterruptedException | ExecutionException e) {
@@ -207,7 +198,7 @@ public class ConwayKafkaStreamTool {
     }
 
 
-    private static List<Cell> createInitial(long numCells){
+    private static List<Cell> createInitial(long numCells) {
         List<Coord> coords = new LinkedList<>();
 
         //toad (period 2)
@@ -232,9 +223,7 @@ public class ConwayKafkaStreamTool {
 
 
         return coords.stream().map(c ->
-//            Cell.newBuilder().setAlive(true).setGeneration(0).setCoordinates(c).build())
-
-        Cell.newBuilder().setAlive(true).setGeneration(0).setX(c.getX()).setY(c.getY()).build())
+                Cell.newBuilder().setAlive(true).setGeneration(0).setX(c.getX()).setY(c.getY()).build())
                 .collect(Collectors.toList());
 
     }
