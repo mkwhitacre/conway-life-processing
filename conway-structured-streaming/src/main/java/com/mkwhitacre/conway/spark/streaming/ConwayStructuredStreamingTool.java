@@ -17,6 +17,10 @@
 
 package com.mkwhitacre.conway.spark.streaming;
 
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -30,6 +34,7 @@ import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.functions;
+import org.apache.spark.sql.streaming.ProcessingTime;
 import org.apache.spark.sql.streaming.StreamingQuery;
 import scala.Tuple2;
 
@@ -38,12 +43,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -53,7 +60,7 @@ public final class ConwayStructuredStreamingTool {
 
         String bootstrapServers = "localhost:9092";
         String subscribeType = "subscribe";
-        String topics = "test-sum"+System.currentTimeMillis();
+        String topics = "test-blinker10";
 
 
         writeData(bootstrapServers, topics);
@@ -164,9 +171,11 @@ public final class ConwayStructuredStreamingTool {
 
 
         //group the cells by the same coordinator values
-        Dataset<Row> mergeCells = worldWithNeighbors.groupBy("coord")
+        Dataset<Row> mergeCells = worldWithNeighbors
+                .groupBy(worldWithNeighbors.col("coord"))
                 //aggregate the cells by summing up the count of the neighbors and also merging the cells using a UDAF
-                .agg(functions.sum("count").as("combined_count"), functions.expr("mergeCells(cell.alive, cell.x, cell.y) as merged"));
+                .agg(functions.sum("count").as("combined_count"),
+                        functions.expr("mergeCells(cell.alive, cell.x, cell.y, cell.generation) as merged"));
 
 //        +-----+--------------+-----------+
 //        |coord|combined_count|     merged|
@@ -206,10 +215,45 @@ public final class ConwayStructuredStreamingTool {
         StreamingQuery query = nextGeneration.writeStream()
                 .outputMode("complete")
                 .format("console")
+                .trigger(ProcessingTime.create(10, TimeUnit.SECONDS))
                 .start();
+
+//        StreamingQuery start = nextGeneration.writeStream()
+//                .foreach(new KafkaWriterFn(bootstrapServers, topics))
+//                .outputMode("complete")
+////                .trigger(ProcessingTime.create(10, TimeUnit.SECONDS))
+//                .start();
 
 
         query.awaitTermination();
+//        start.awaitTermination();
+
+
+//        readData(bootstrapServers, topics);
+
+
+    }
+
+    private static void readData(String bootstrapServers, String topics) {
+        Properties props = new Properties();
+        props.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, JavaStructuredKafkaWordCount.StringSerDe.class.getName());
+        props.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, CellSerDe.class.getName());
+        props.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "dummy");
+
+        Consumer<String, SparkCell> consumer = new KafkaConsumer<>(props);
+
+        consumer.subscribe(Collections.singleton(topics));
+
+        while(true) {
+            ConsumerRecords<String, SparkCell> poll = consumer.poll(1000L);
+
+            poll.forEach(r -> {
+                System.out.println("Key:"+r.key()+ " Value:"+r.value());
+            });
+        }
     }
 
 
@@ -220,19 +264,20 @@ public final class ConwayStructuredStreamingTool {
         props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, JavaStructuredKafkaWordCount.StringSerDe.class.getName());
         props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, CellSerDe.class.getName());
 
-        Producer<String, SparkCell> producer = new KafkaProducer<>(props);
+        try(Producer<String, SparkCell> producer = new KafkaProducer<>(props)) {
 
-        List<Future<RecordMetadata>> futures = new LinkedList<>();
-        for(SparkCell cell: createInitial(10)){
+            List<Future<RecordMetadata>> futures = new LinkedList<>();
+            for (SparkCell cell : createInitial(10)) {
 
-            futures.add(producer.send(new ProducerRecord<>(topic, "key" + cell.getX()+"-"+cell.getY(), cell)));
-        }
+                futures.add(producer.send(new ProducerRecord<>(topic, "key" + cell.getX() + "-" + cell.getY(), cell)));
+            }
 
-        for(Future<RecordMetadata> f: futures){
-            try {
-                f.get();
-            } catch (InterruptedException | ExecutionException e) {
-                throw new RuntimeException("stuff didn't work", e);
+            for (Future<RecordMetadata> f : futures) {
+                try {
+                    f.get();
+                } catch (InterruptedException | ExecutionException e) {
+                    throw new RuntimeException("stuff didn't work", e);
+                }
             }
         }
     }

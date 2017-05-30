@@ -22,6 +22,7 @@ public class AggregateCellsUntypedFn extends UserDefinedAggregateFunction{
         inputFields.add(DataTypes.createStructField("alive", DataTypes.BooleanType, false));
         inputFields.add(DataTypes.createStructField("x", DataTypes.LongType, false));
         inputFields.add(DataTypes.createStructField("y", DataTypes.LongType, false));
+        inputFields.add(DataTypes.createStructField("generation", DataTypes.LongType, false));
         inputSchema = DataTypes.createStructType(inputFields);
 
         return inputSchema;
@@ -47,6 +48,7 @@ public class AggregateCellsUntypedFn extends UserDefinedAggregateFunction{
         buffer.update(0, false);
         buffer.update(1, Long.MIN_VALUE);
         buffer.update(2, Long.MIN_VALUE);
+        buffer.update(3, Long.MIN_VALUE);
     }
 
     @Override
@@ -54,14 +56,17 @@ public class AggregateCellsUntypedFn extends UserDefinedAggregateFunction{
         boolean cellAlive = input.getBoolean(0);
         long cellX = input.getLong(1);
         long cellY = input.getLong(2);
+        long generation = input.getLong(3);
 
         boolean isAlive = buffer.getBoolean(0) || cellAlive;
         long x = Math.max(buffer.getLong(1), cellX);
         long y = Math.max(buffer.getLong(2), cellY);
+        long gen = Math.max(buffer.getLong(3), generation);
 
         buffer.update(0, isAlive);
         buffer.update(1, x);
         buffer.update(2, y);
+        buffer.update(3, gen);
     }
 
     @Override

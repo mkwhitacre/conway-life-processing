@@ -14,7 +14,9 @@ protocol CellProtocol {
      */
      record Cell{
      
-         Coord coordinates;
+         long x;
+
+         long y;
 
          /**
          * The generation this cell exists in

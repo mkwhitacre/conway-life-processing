@@ -11,6 +11,12 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KStreamBuilder;
+import org.apache.kafka.streams.kstream.KTable;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -20,22 +26,116 @@ import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 public class ConwayKafkaStreamTool {
 
-    public static void main(String[] args){
+    public static void main(String[] args) throws InterruptedException {
 
 
         String bootstrapServers = "localhost:9092";
         String schemaURL = "http://localhost:8081";
-        String startTopic = "start-cells-blinker-foo";
+        //Use this to ensure uniqueness of topic + state
+        long unique = System.currentTimeMillis();
+        String startTopic = "start-cells-blinker-foobar"+unique;
+
 
         writeData(bootstrapServers, schemaURL, startTopic);
 
-        String endTopic = "life-cells-blinker";
+        final Properties streamsConfiguration = new Properties();
+        // Give the Streams application a unique name.  The name must be unique in the Kafka cluster
+        // against which the application is run.
+        streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "conway-kafka-streams-example");
+        // Where to find Kafka broker(s).
+        streamsConfiguration.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        // Records should be flushed every 10 seconds. This is less than the default
+        // in order to keep this example interactive.
+        streamsConfiguration.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 10 * 1000);
+        // For illustrative purposes we disable record caches
+        streamsConfiguration.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
 
 
-        readCells(bootstrapServers, schemaURL, startTopic);
+
+        final KStreamBuilder builder = new KStreamBuilder();
+
+        SpecificAvroSerde<Coord> keySerde = createSerde(schemaURL);
+        SpecificAvroSerde<Cell> valueSerde = createSerde(schemaURL);
+
+
+
+        KStream<Coord, Cell> cells = builder.stream(keySerde, valueSerde, startTopic);
+
+        KStream<Coord, Cell> cellsWithNeighbors = cells.flatMap((key, value) -> {
+
+            long cellX = key.getX();
+            long cellY = key.getY();
+
+            System.out.println("Key:"+key+" Value:"+value);
+
+            //emit this value for coordinates that are for neighbors
+            Cell neighborValue = Cell.newBuilder().setAlive(false).setX(cellX).setY(cellY)
+                    .setNeighborCount(1).setGeneration(value.getGeneration()+1).build();
+
+            return LongStream.range(-1, 2).mapToObj(x -> LongStream.range(-1, 2)
+                    //collect neighbor coordinates
+                    .mapToObj(y ->
+                        Coord.newBuilder().setX(cellX + x).setY(cellY + y).build())
+                    .collect(Collectors.toList()))
+                    //flatmap into a single list of <Coord, Cell>
+                    .flatMap(List::stream).map(c -> {
+                //if this refers to the cell then place SparkCell in the value
+                if (c.getX().equals(cellX) && c.getY().equals(cellY)) {
+                    return new KeyValue<>(c, value);
+                }
+
+                return new KeyValue<>(c, Cell.newBuilder(neighborValue).setX(c.getX()).setY(c.getY()).build());
+            }).collect(Collectors.toList());
+        });
+
+
+        KTable<Coord, Cell> reduce = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
+
+
+
+ .reduce((aggValue, newValue) -> {
+      return Cell.newBuilder(aggValue).setAlive(aggValue.getAlive()|| newValue.getAlive())
+                    .setNeighborCount(aggValue.getNeighborCount()+newValue.getNeighborCount()).build();
+        }, "reduce-cells"+unique).mapValues(c -> {
+
+            boolean isAlive = c.getAlive();
+            int neighborCount = c.getNeighborCount();
+
+            Cell.Builder cellBuilder = Cell.newBuilder(c);
+
+            if(isAlive){
+                if(neighborCount == 2 || neighborCount == 3){
+                    cellBuilder.setAlive(true);
+                }
+            }else{
+                if(neighborCount == 3){
+                    cellBuilder.setAlive(true);
+                }
+            }
+
+            return cellBuilder.build();
+        }).filter((k, v) -> v != null || v.getAlive());
+
+        reduce.print();
+
+        reduce = reduce.mapValues(c -> Cell.newBuilder(c).clearNeighborCount().build());
+
+        reduce.to(keySerde, valueSerde, startTopic);
+
+        final KafkaStreams streams = new KafkaStreams(builder, streamsConfiguration);
+
+        streams.cleanUp();
+        streams.start();
+
+
+        Thread.sleep(120000L);
+
+
+//        readCells(bootstrapServers, schemaURL, startTopic);
 
 
     }
@@ -76,8 +176,8 @@ public class ConwayKafkaStreamTool {
         List<Future<RecordMetadata>> futures = new LinkedList<>();
         for(Cell cell: createInitial(10)){
 
-//            Coord coord = Coord.newBuilder().setX(cell.getX()).setY(cell.getY()).build();
-                        Coord coord = Coord.newBuilder(cell.getCoordinates()).build();
+            Coord coord = Coord.newBuilder().setX(cell.getX()).setY(cell.getY()).build();
+//                        Coord coord = Coord.newBuilder(cell.getCoordinates()).build();
 
             futures.add(producer.send(new ProducerRecord<>(topic, coord , cell)));
         }
@@ -132,9 +232,9 @@ public class ConwayKafkaStreamTool {
 
 
         return coords.stream().map(c ->
-            Cell.newBuilder().setAlive(true).setGeneration(0).setCoordinates(c).build())
+//            Cell.newBuilder().setAlive(true).setGeneration(0).setCoordinates(c).build())
 
-//        Cell.newBuilder().setAlive(true).setGeneration(0).setX(c.getX()).setY(c.getY()).build())
+        Cell.newBuilder().setAlive(true).setGeneration(0).setX(c.getX()).setY(c.getY()).build())
                 .collect(Collectors.toList());
 
     }

@@ -16,11 +16,13 @@ public class LifeDeathFn implements MapFunction<Row, SparkCell> {
         boolean isAlive = merged.getBoolean(0);
         long x = merged.getLong(1);
         long y = merged.getLong(2);
+        long gen = merged.getLong(3);
 
         SparkCell cell = new SparkCell();
         cell.setX(x);
         cell.setY(y);
         cell.setAlive(false);
+        cell.setGeneration(gen+1);
 
         if(neighborCount == 3){
             cell.setAlive(true);

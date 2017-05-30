@@ -5,7 +5,7 @@ import org.junit.Test;
 public class ConwayKafkaStreamToolTest {
 
     @Test
-    public void test(){
+    public void test() throws InterruptedException {
         ConwayKafkaStreamTool.main(new String[0]);
     }
 }
