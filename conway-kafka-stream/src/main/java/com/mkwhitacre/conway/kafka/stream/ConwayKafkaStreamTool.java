@@ -66,6 +66,8 @@ public class ConwayKafkaStreamTool {
         //create all of the neighbors so that we can perform the proper counts.
         KStream<Coord, Cell> cellsWithNeighbors = cells.flatMap((key, value) -> {
 
+            System.out.println("Key:" + key+ " Value: "+value);
+
             long cellX = key.getX();
             long cellY = key.getY();
             //increment the generation value as we are calculating a new generation
@@ -94,9 +96,10 @@ public class ConwayKafkaStreamTool {
         });
 
 
-        KTable<Coord, Cell> reduce = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
+        KTable<Coord, Cell> aggTable = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
                 .reduce((aggValue, newValue) -> {
 
+                    System.out.println("AggValue:" + aggValue+ " NewValue: "+newValue);
                     //The KTable being created maintains the values from the last iteration
                     //and we do not want those values to affect our current count.
                     //therefore to avoid using those values in the count we only aggregate
@@ -117,34 +120,43 @@ public class ConwayKafkaStreamTool {
                             .setNeighborCount(aggValue.getNeighborCount() + newValue.getNeighborCount()).build();
                 }, "reduce-cells" + unique)
 
+
+                .through(keySerde, valueSerde, "agg-world"+unique, "agg"+unique);
+
+        aggTable.print();
+
                 //now that we've aggregated counts we should apply the rules
-                .mapValues(c -> {
-                    boolean isAlive = c.getAlive();
-                    int neighborCount = c.getNeighborCount();
-                    //reset the count
-                    Cell.Builder cellBuilder = Cell.newBuilder(c).clearNeighborCount();
+        KTable<Coord, Cell> rulesCells = aggTable.mapValues(c -> {
 
-                    if (isAlive) {
-                        //cell is currently alive and should stay alive based on the number of neighbors
-                        if (neighborCount == 2 || neighborCount == 3) {
-                            return cellBuilder.setAlive(true).build();
-                        }
-                    } else {
-                        //cell is not alive but should be if count is correct value.
-                        if (neighborCount == 3) {
-                            return cellBuilder.setAlive(true).build();
-                        }
-                    }
+            System.out.println("Map Value:" + c);
 
-                    //For cells that should not be alive or die, need to emit null to represent a delete
-                    return (Cell) null;
-                });
+            boolean isAlive = c.getAlive();
+            int neighborCount = c.getNeighborCount();
+            //reset the count
+            Cell.Builder cellBuilder = Cell.newBuilder(c).clearNeighborCount();
+
+            if (isAlive) {
+                //cell is currently alive and should stay alive based on the number of neighbors
+                if (neighborCount == 2 || neighborCount == 3) {
+                    return cellBuilder.setAlive(true).build();
+                }
+            } else {
+                //cell is not alive but should be if count is correct value.
+                if (neighborCount == 3) {
+                    return cellBuilder.setAlive(true).build();
+                }
+            }
+
+            //For cells that should not be alive or die, need to emit null to represent a delete
+            return (Cell) null;
+        });
+
 
         //print out the state of the table for debug purposes.
-        reduce.print();
+        rulesCells.print();
 
         //write the "changes" of updates, inserts, and deletes into the original topic
-        reduce.to(keySerde, valueSerde, topic);
+        rulesCells.toStream().to(keySerde, valueSerde, topic);
 
         final KafkaStreams streams = new KafkaStreams(builder, streamsConfiguration);
 
@@ -202,17 +214,17 @@ public class ConwayKafkaStreamTool {
         List<Coord> coords = new LinkedList<>();
 
         //toad (period 2)
-//        coords.add(Coord.newBuilder().setX(2L).setY(3L).build());
-//        coords.add(Coord.newBuilder().setX(3L).setY(3L).build());
-//        coords.add(Coord.newBuilder().setX(4L).setY(3L).build());
-//        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
-//        coords.add(Coord.newBuilder().setX(2L).setY(2L).build());
-//        coords.add(Coord.newBuilder().setX(3L).setY(2L).build());
+        coords.add(Coord.newBuilder().setX(2L).setY(3L).build());
+        coords.add(Coord.newBuilder().setX(3L).setY(3L).build());
+        coords.add(Coord.newBuilder().setX(4L).setY(3L).build());
+        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
+        coords.add(Coord.newBuilder().setX(2L).setY(2L).build());
+        coords.add(Coord.newBuilder().setX(3L).setY(2L).build());
 
         //blinker (period 2)
-        coords.add(Coord.newBuilder().setX(1L).setY(3L).build());
-        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
-        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());
+//        coords.add(Coord.newBuilder().setX(1L).setY(3L).build());
+//        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
+//        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());
 
         //Glider
 //        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());
