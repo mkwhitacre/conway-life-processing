@@ -18,14 +18,10 @@ protocol CellProtocol {
 
          long y;
 
-         /**
-         * The generation this cell exists in
-         */
          long generation = -1;
 
          boolean alive = false;
 
          int neighborCount = 0;
-
      }
 }

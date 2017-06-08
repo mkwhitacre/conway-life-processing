@@ -14,6 +14,8 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KStreamBuilder;
 import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.TimeWindows;
+import org.apache.kafka.streams.kstream.Windowed;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -96,10 +99,8 @@ public class ConwayKafkaStreamTool {
         });
 
 
-        KTable<Coord, Cell> aggTable = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
+        KTable<Windowed<Coord>, Cell> reduceTable = cellsWithNeighbors.groupByKey(keySerde, valueSerde)
                 .reduce((aggValue, newValue) -> {
-
-                    System.out.println("AggValue:" + aggValue+ " NewValue: "+newValue);
                     //The KTable being created maintains the values from the last iteration
                     //and we do not want those values to affect our current count.
                     //therefore to avoid using those values in the count we only aggregate
@@ -118,15 +119,12 @@ public class ConwayKafkaStreamTool {
                     //generation values are the same so we should aggregate the values
                     return Cell.newBuilder(aggValue).setAlive(aggValue.getAlive() || newValue.getAlive())
                             .setNeighborCount(aggValue.getNeighborCount() + newValue.getNeighborCount()).build();
-                }, "reduce-cells" + unique)
+                }, TimeWindows.of(TimeUnit.SECONDS.toMillis(10)).advanceBy(TimeUnit.SECONDS.toMillis(10)),
+                        "reduce-cells" + unique);
+        reduceTable.print();
 
-
-                .through(keySerde, valueSerde, "agg-world"+unique, "agg"+unique);
-
-        aggTable.print();
-
-                //now that we've aggregated counts we should apply the rules
-        KTable<Coord, Cell> rulesCells = aggTable.mapValues(c -> {
+        //now that we've aggregated counts we should apply the rules
+        KTable<Windowed<Coord>, Cell> rulesCells = reduceTable.mapValues(c -> {
 
             System.out.println("Map Value:" + c);
 
@@ -151,12 +149,11 @@ public class ConwayKafkaStreamTool {
             return (Cell) null;
         });
 
-
         //print out the state of the table for debug purposes.
         rulesCells.print();
 
         //write the "changes" of updates, inserts, and deletes into the original topic
-        rulesCells.toStream().to(keySerde, valueSerde, topic);
+        rulesCells.toStream().map((k, v) -> new KeyValue<>(k.key(), v)).to(keySerde, valueSerde, topic);
 
         final KafkaStreams streams = new KafkaStreams(builder, streamsConfiguration);
 
@@ -214,17 +211,17 @@ public class ConwayKafkaStreamTool {
         List<Coord> coords = new LinkedList<>();
 
         //toad (period 2)
-        coords.add(Coord.newBuilder().setX(2L).setY(3L).build());
-        coords.add(Coord.newBuilder().setX(3L).setY(3L).build());
-        coords.add(Coord.newBuilder().setX(4L).setY(3L).build());
-        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
-        coords.add(Coord.newBuilder().setX(2L).setY(2L).build());
-        coords.add(Coord.newBuilder().setX(3L).setY(2L).build());
+//        coords.add(Coord.newBuilder().setX(2L).setY(3L).build());
+//        coords.add(Coord.newBuilder().setX(3L).setY(3L).build());
+//        coords.add(Coord.newBuilder().setX(4L).setY(3L).build());
+//        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
+//        coords.add(Coord.newBuilder().setX(2L).setY(2L).build());
+//        coords.add(Coord.newBuilder().setX(3L).setY(2L).build());
 
         //blinker (period 2)
-//        coords.add(Coord.newBuilder().setX(1L).setY(3L).build());
-//        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
-//        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());
+        coords.add(Coord.newBuilder().setX(1L).setY(3L).build());
+        coords.add(Coord.newBuilder().setX(1L).setY(2L).build());
+        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());
 
         //Glider
 //        coords.add(Coord.newBuilder().setX(1L).setY(1L).build());

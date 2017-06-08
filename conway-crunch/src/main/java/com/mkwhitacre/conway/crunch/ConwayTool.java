@@ -70,24 +70,24 @@ public class ConwayTool extends Configured implements Tool{
         List<Cell> cells = new LinkedList<>();
 
         //toad (period 2)
-//        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(3).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(3).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(4).setY(3).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(2).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(2).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(2).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(3).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(4).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(1).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(2).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(3).setY(2).setGeneration(0).setAlive(true).build());
 
         //blinker (period 2)
-//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(3).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(2).setGeneration(0).setAlive(true).build());
-//        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(1).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(1).setY(3).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(1).setY(2).setGeneration(0).setAlive(true).build());
+//        cells.add(Cell.newBuilder().setX(1).setY(1).setGeneration(0).setAlive(true).build());
 
         //Glider
-        cells.add(Cell.newBuilder().setSelf(true).setX(1).setY(1).setGeneration(0).setAlive(true).build());
-        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(1).setGeneration(0).setAlive(true).build());
-        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(1).setGeneration(0).setAlive(true).build());
-        cells.add(Cell.newBuilder().setSelf(true).setX(3).setY(2).setGeneration(0).setAlive(true).build());
-        cells.add(Cell.newBuilder().setSelf(true).setX(2).setY(3).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setX(1).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setX(2).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setX(3).setY(1).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setX(3).setY(2).setGeneration(0).setAlive(true).build());
+        cells.add(Cell.newBuilder().setX(2).setY(3).setGeneration(0).setAlive(true).build());
 
         return pipeline.create(cells, Avros.records(Cell.class));
     }

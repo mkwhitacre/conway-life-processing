@@ -36,13 +36,13 @@ public class ApplyRulesFn extends MapFn<Pair<Pair<Long, Long>, Iterable<Cell>>, 
             //cell is dead so check to see if icomes alive
             if(neighborCount == 3) {
                 return Pair.of(coord, Cell.newBuilder().setX(coord.first())
-                        .setY(coord.second()).setAlive(true).setSelf(true).setGeneration(generation).build());
+                        .setY(coord.second()).setAlive(true).setGeneration(generation).build());
             }
         } else{
             //cell is alive so check to see if it stays alive
             if(neighborCount ==2 || neighborCount== 3) {
                 //Any live cell with two or three live neighbours lives on to the next generation.
-                return Pair.of(coord, Cell.newBuilder(self).setAlive(true).setSelf(true)
+                return Pair.of(coord, Cell.newBuilder(self).setAlive(true)
                         .setGeneration(generation).build());
             }
         }
@@ -50,7 +50,7 @@ public class ApplyRulesFn extends MapFn<Pair<Pair<Long, Long>, Iterable<Cell>>, 
         //Any live cell with fewer than two live neighbours dies, as if caused by underpopulation.
         //Any live cell with more than three live neighbours dies, as if by overpopulation.
         return Pair.of(coord, Cell.newBuilder().setX(coord.first()).setY(coord.second())
-                .setAlive(false).setSelf(true).setGeneration(generation).build());
+                .setAlive(false).setGeneration(generation).build());
 
     }
 }

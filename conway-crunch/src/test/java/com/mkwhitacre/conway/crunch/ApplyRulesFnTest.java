@@ -56,7 +56,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(true));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -82,7 +81,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(false));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -110,7 +108,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(true));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -131,7 +128,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(false));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -156,7 +152,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(true));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -180,7 +175,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(false));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -205,7 +199,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(false));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 
@@ -231,7 +224,6 @@ public class ApplyRulesFnTest {
         assertThat(outCell.getX(), is(x));
         assertThat(outCell.getY(), is(y));
         assertThat(outCell.getAlive(), is(false));
-        assertThat(outCell.getSelf(), is(true));
         assertThat(outCell.getGeneration(), is(generation));
     }
 }
