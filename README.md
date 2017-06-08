@@ -1,6 +1,6 @@
 # Conway's Game of Life
 
-[Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) presents an interesting problem that is often fun to implement in new a different ways.  The purpose of this repository is to serve as a companion to a presentation called "[Processing Life At Ridiculous Scall](https://docs.google.com/presentation/d/1_ZSXaXjbbOJws4NtdKCK-UMLlOrCoBGb2JdwQXGb0yw/edit?usp=sharing)".  The goal of that presentation is to talk about how to implement Conway's Game of Life in modern distributed system's processing infrastructure.  The ultimate goal is to just have fun and experiment.
+[Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) presents an interesting problem that is often fun to implement in new a different ways.  The purpose of this repository is to serve as a companion to a presentation called "[Processing Life At Ridiculous Scale](https://docs.google.com/presentation/d/1_ZSXaXjbbOJws4NtdKCK-UMLlOrCoBGb2JdwQXGb0yw/edit?usp=sharing)".  The goal of that presentation is to talk about how to implement Conway's Game of Life in modern distributed system's processing infrastructure.  The ultimate goal is to just have fun and experiment.
 
 # Example Processing Engines
 
